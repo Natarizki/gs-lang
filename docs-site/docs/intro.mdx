@@ -1,0 +1,44 @@
+---
+sidebar_position: 1
+---
+
+# Introduction
+
+**GoSong (GS)** is a general-purpose programming language designed to be extremely easy to learn, blending the syntax style of Go and Python, with a unique **task orchestration** feature for declaratively controlling program execution flow.
+
+## Key Features
+
+- **`{}` syntax** — consistent and strict, inspired by Go/C. No indentation-based blocks.
+- **Dynamic typing** — no explicit type declarations needed.
+- **Task orchestration** — `start`, `then`, `startif`, `elstart` to control the order and conditions of execution between program blocks.
+- **Automatic error handling** — `error` and `try` with auto-propagation.
+- **Simple OOP** — struct + methods in Go style (`fnc (receiver type) name { ... }`).
+- **String interpolation** — `"hello {name}"`.
+- **Built-in package manager** — `gsi`/`gsc install` to fetch packages from GitHub.
+- **Compile to binary** — `gsc build` produces a standalone binary.
+
+## Installation
+```
+git clone https://github.com/Natarizki/gs-lang.git
+cd gs-lang
+go build -o gsc .
+```
+## Your First Program
+
+Every GS program's entry file must be wrapped in a **task block** (`{ }`). This is the only required structure — everything else lives inside it.
+```GS
+{
+   fnc main {
+      print("hello world!")
+    }
+}
+```
+Run it:
+```GS
+./gsc run hello.gs
+```
+Output:
+```output
+hello world!
+```
+Ready to learn more? Head to [Getting Started](./getting-started).
