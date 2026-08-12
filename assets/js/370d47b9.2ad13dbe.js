@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunkdocs_site||=[]).push([[5077],{8849(t){t.exports=JSON.parse('{"metadata":{"permalink":"/gs-lang/blog","page":1,"postsPerPage":10,"totalPages":1,"totalCount":4,"blogDescription":"Blog","blogTitle":"Blog"}}')}}]);
