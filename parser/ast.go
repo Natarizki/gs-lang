@@ -416,3 +416,23 @@ type InterpolationPart struct {
 
 func (is *InterpolatedString) expressionNode()      {}
 func (is *InterpolatedString) TokenLiteral() string { return is.Token.Literal }
+
+// GetLine mengembalikan nomor baris dari sebuah node, dipakai untuk
+// line-tracking bytecode generator (lihat bytecode.nodeLine)
+func (es *ExpressionStatement) GetLine() int { return es.Token.Line }
+func (ls *LetStatement) GetLine() int        { return ls.Token.Line }
+func (rs *ReturnStatement) GetLine() int     { return rs.Token.Line }
+func (is *IfStatement) GetLine() int         { return is.Token.Line }
+func (fs *ForStatement) GetLine() int        { return fs.Token.Line }
+func (ms *MatchStatement) GetLine() int      { return ms.Token.Line }
+func (es2 *ErrorStatement) GetLine() int     { return es2.Token.Line }
+func (ts *TryStatement) GetLine() int        { return ts.Token.Line }
+func (fs2 *FuncStatement) GetLine() int      { return fs2.Token.Line }
+func (ss *StructStatement) GetLine() int     { return ss.Token.Line }
+func (ms2 *MethodStatement) GetLine() int    { return ms2.Token.Line }
+func (ce *CallExpression) GetLine() int      { return ce.Token.Line }
+func (ie *InfixExpression) GetLine() int     { return ie.Token.Line }
+func (pe *PrefixExpression) GetLine() int    { return pe.Token.Line }
+func (id *Identifier) GetLine() int          { return id.Token.Line }
+func (ix *IndexExpression) GetLine() int     { return ix.Token.Line }
+func (de *DotExpression) GetLine() int       { return de.Token.Line }

@@ -140,6 +140,7 @@ type CompiledFunction struct {
 	Instructions  bytecode.Instructions
 	NumLocals     int
 	NumParameters int
+	LineTable     map[int]int
 }
 
 func (cf *CompiledFunction) Type() ValueType { return FUNCTION_VALUE }

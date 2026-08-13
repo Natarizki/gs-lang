@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 
 	"gs-lang/bytecode"
 )
@@ -39,6 +40,10 @@ type VM struct {
 
 	frames      []*Frame
 	framesIndex int
+
+	lineTable map[int]int
+	filename  string
+	source    string
 }
 
 func New(bc *bytecode.Bytecode) *VM {
@@ -55,7 +60,68 @@ func New(bc *bytecode.Bytecode) *VM {
 		globals:     make([]Value, GlobalsSize),
 		frames:      frames,
 		framesIndex: 1,
+		lineTable:   bc.LineTable,
 	}
+}
+
+// SetSourceInfo mengatur nama file dan source code asli, dipakai untuk
+// menghasilkan pesan error runtime yang menunjukkan baris kode asli
+func (vm *VM) SetSourceInfo(filename string, source string) {
+	vm.filename = filename
+	vm.source = source
+}
+
+// currentLine mencari nomor baris source yang berkaitan dengan posisi
+// instruksi (ip) yang sedang dieksekusi di frame saat ini
+func (vm *VM) currentLine() int {
+	frame := vm.currentFrame()
+	lt := frame.fn.LineTable
+	if lt == nil {
+		return 0
+	}
+	ip := frame.ip
+	bestPos := -1
+	bestLine := 0
+	for pos, line := range lt {
+		if pos <= ip && pos > bestPos {
+			bestPos = pos
+			bestLine = line
+		}
+	}
+	return bestLine
+}
+
+// runtimeError membungkus sebuah pesan error dengan informasi baris kode
+// asli, mirip format compile-time error
+func (vm *VM) runtimeError(format string, args ...interface{}) error {
+	msg := fmt.Sprintf(format, args...)
+	line := vm.currentLine()
+	if vm.source == "" || line == 0 {
+		return fmt.Errorf("%s", msg)
+	}
+	return fmt.Errorf("%s", formatRuntimeError(vm.filename, vm.source, line, msg))
+}
+
+// formatRuntimeError menghasilkan pesan error bergaya Rust/Go modern untuk
+// runtime error, menunjukkan baris kode asli dan penunjuk posisi
+func formatRuntimeError(filename string, src string, line int, message string) string {
+	lines := strings.Split(src, "\n")
+	if line < 1 || line > len(lines) {
+		return fmt.Sprintf("%s\n  --> %s:%d", message, filename, line)
+	}
+
+	codeLine := lines[line-1]
+	lineNumStr := fmt.Sprintf("%d", line)
+	padding := strings.Repeat(" ", len(lineNumStr))
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", message)
+	fmt.Fprintf(&b, "  %s--> %s:%d\n", padding, filename, line)
+	fmt.Fprintf(&b, "   %s|\n", padding)
+	fmt.Fprintf(&b, " %s | %s\n", lineNumStr, codeLine)
+	fmt.Fprintf(&b, "   %s|\n", padding)
+
+	return b.String()
 }
 
 // rawFieldNames membungkus []string supaya bisa disimpan sebagai Value di constant pool
@@ -83,6 +149,7 @@ func convertConstants(raw []interface{}) []Value {
 				Instructions:  v.Instructions,
 				NumLocals:     v.NumLocals,
 				NumParameters: v.NumParameters,
+				LineTable:     v.LineTable,
 			}
 		case *bytecode.StructDefConstant:
 			result[i] = &StructDef{Name: v.Name, Fields: v.Fields}
@@ -109,7 +176,7 @@ func (vm *VM) popFrame() *Frame {
 
 func (vm *VM) push(v Value) error {
 	if vm.sp >= StackSize {
-		return fmt.Errorf("stack overflow")
+		return vm.runtimeError("stack overflow")
 	}
 	vm.stack[vm.sp] = v
 	vm.sp++
@@ -147,7 +214,7 @@ func (vm *VM) run(stopAtDepth int) error {
 		ip = vm.currentFrame().ip
 		ins = vm.currentFrame().Instructions()
 		if ip >= len(ins) {
-			return fmt.Errorf("internal VM error: ip %d out of bounds (len %d) in frame %d", ip, len(ins), vm.framesIndex)
+			return vm.runtimeError("internal VM error: ip %d out of bounds (len %d) in frame %d", ip, len(ins), vm.framesIndex)
 		}
 		op = bytecode.Opcode(ins[ip])
 
@@ -211,7 +278,7 @@ func (vm *VM) run(stopAtDepth int) error {
 					return err
 				}
 			default:
-				return fmt.Errorf("unsupported type for negation: %s", operand.Type())
+				return vm.runtimeError("unsupported type for negation: %s", operand.Type())
 			}
 
 		case bytecode.OpNot:
@@ -293,7 +360,7 @@ func (vm *VM) run(stopAtDepth int) error {
 			defValue := vm.pop()
 			def, ok := defValue.(*StructDef)
 			if !ok {
-				return fmt.Errorf("cannot initialize non-struct type")
+				return vm.runtimeError("cannot initialize non-struct type")
 			}
 
 			instance := &StructInstance{Def: def, Values: make(map[string]Value)}
@@ -312,7 +379,7 @@ func (vm *VM) run(stopAtDepth int) error {
 			left := vm.pop()
 			instance, ok := left.(*StructInstance)
 			if !ok {
-				return fmt.Errorf("dot access not supported for type %s", left.Type())
+				return vm.runtimeError("dot access not supported for type %s", left.Type())
 			}
 			val, ok := instance.Values[fieldName]
 			if !ok {
@@ -332,7 +399,7 @@ func (vm *VM) run(stopAtDepth int) error {
 
 			def, ok := structDefValue.(*StructDef)
 			if !ok {
-				return fmt.Errorf("cannot attach method to non-struct type")
+				return vm.runtimeError("cannot attach method to non-struct type")
 			}
 			if def.Methods == nil {
 				def.Methods = make(map[string]Value)
@@ -349,12 +416,12 @@ func (vm *VM) run(stopAtDepth int) error {
 			instanceValue := vm.stack[vm.sp-numArgs-1]
 			instance, ok := instanceValue.(*StructInstance)
 			if !ok {
-				return fmt.Errorf("cannot call method %q on non-struct value", methodName)
+				return vm.runtimeError("cannot call method %q on non-struct value", methodName)
 			}
 
 			methodFn, ok := instance.Def.Methods[methodName]
 			if !ok {
-				return fmt.Errorf("undefined method %q on struct %s", methodName, instance.Def.Name)
+				return vm.runtimeError("undefined method %q on struct %s", methodName, instance.Def.Name)
 			}
 
 			// instance sudah ada di posisi bawah stack sebagai argumen pertama
@@ -363,14 +430,14 @@ func (vm *VM) run(stopAtDepth int) error {
 			switch fn := methodFn.(type) {
 			case *CompiledFunction:
 				if numArgs+1 != fn.NumParameters {
-					return fmt.Errorf("wrong number of arguments for method %q: expected %d, got %d",
+					return vm.runtimeError("wrong number of arguments for method %q: expected %d, got %d",
 						methodName, fn.NumParameters-1, numArgs)
 				}
 				frame := NewMethodFrame(fn, vm.sp-numArgs-1)
 				vm.pushFrame(frame)
 				vm.sp = frame.basePointer + fn.NumLocals
 			default:
-				return fmt.Errorf("method %q is not callable", methodName)
+				return vm.runtimeError("method %q is not callable", methodName)
 			}
 
 		case bytecode.OpIndex:
@@ -514,13 +581,13 @@ func (vm *VM) run(stopAtDepth int) error {
                         return nil
 
                 default:
-                        return fmt.Errorf("unknown opcode: %d", op)
+                        return vm.runtimeError("unknown opcode: %d", op)
                 }
         }
 
         if vm.sp > 0 {
                 if errVal, ok := vm.stack[vm.sp-1].(*ErrorValue); ok {
-                        return fmt.Errorf("%s", errVal.Message)
+                        return vm.runtimeError("%s", errVal.Message)
                 }
         }
 
@@ -552,7 +619,7 @@ func (vm *VM) executeBinaryOperation(op bytecode.Opcode) error {
 		}
 	}
 
-	return fmt.Errorf("unsupported types for binary operation: %s %s", left.Type(), right.Type())
+	return vm.runtimeError("unsupported types for binary operation: %s %s", left.Type(), right.Type())
 }
 
 func toFloat(v Value) (float64, bool) {
@@ -577,18 +644,18 @@ func (vm *VM) executeBinaryIntOperation(op bytecode.Opcode, left, right *Int) er
 		result = left.Value * right.Value
 	case bytecode.OpDiv:
 		if right.Value == 0 {
-			return fmt.Errorf("division by zero")
+			return vm.runtimeError("division by zero")
 		}
 		result = left.Value / right.Value
 	case bytecode.OpMod:
 		if right.Value == 0 {
-			return fmt.Errorf("division by zero")
+			return vm.runtimeError("division by zero")
 		}
 		result = left.Value % right.Value
 	case bytecode.OpPow:
 		result = intPow(left.Value, right.Value)
 	default:
-		return fmt.Errorf("unknown integer operator: %d", op)
+		return vm.runtimeError("unknown integer operator: %d", op)
 	}
 	return vm.push(&Int{Value: result})
 }
@@ -612,11 +679,11 @@ func (vm *VM) executeBinaryFloatOperation(op bytecode.Opcode, left, right float6
 		result = left * right
 	case bytecode.OpDiv:
 		if right == 0 {
-			return fmt.Errorf("division by zero")
+			return vm.runtimeError("division by zero")
 		}
 		result = left / right
 	default:
-		return fmt.Errorf("unknown float operator: %d", op)
+		return vm.runtimeError("unknown float operator: %d", op)
 	}
 	return vm.push(&Float{Value: result})
 }
@@ -654,7 +721,7 @@ func (vm *VM) executeComparison(op bytecode.Opcode) error {
 	case bytecode.OpNotEqual:
 		result = !(left.Inspect() == right.Inspect() && left.Type() == right.Type())
 	default:
-		return fmt.Errorf("unsupported comparison for types %s %s", left.Type(), right.Type())
+		return vm.runtimeError("unsupported comparison for types %s %s", left.Type(), right.Type())
 	}
 	return vm.push(NativeBoolToBooleanValue(result))
 }
@@ -664,7 +731,7 @@ func (vm *VM) executeIndex(left, index Value) error {
 	case *List:
 		idx, ok := index.(*Int)
 		if !ok {
-			return fmt.Errorf("list index must be an integer")
+			return vm.runtimeError("list index must be an integer")
 		}
 		if idx.Value < 0 || idx.Value >= int64(len(l.Elements)) {
 			return vm.push(NULL)
@@ -677,7 +744,7 @@ func (vm *VM) executeIndex(left, index Value) error {
 		}
 		return vm.push(val)
 	default:
-		return fmt.Errorf("index operator not supported for type %s", left.Type())
+		return vm.runtimeError("index operator not supported for type %s", left.Type())
 	}
 }
 
@@ -685,16 +752,16 @@ func (vm *VM) executeIndex(left, index Value) error {
 func (vm *VM) executeSlice(left Value, startVal Value, endVal Value) error {
 	list, ok := left.(*List)
 	if !ok {
-		return fmt.Errorf("slice operator only supported for lists, got %s", left.Type())
+		return vm.runtimeError("slice operator only supported for lists, got %s", left.Type())
 	}
 
 	startInt, ok := startVal.(*Int)
 	if !ok {
-		return fmt.Errorf("slice start index must be an integer")
+		return vm.runtimeError("slice start index must be an integer")
 	}
 	endInt, ok := endVal.(*Int)
 	if !ok {
-		return fmt.Errorf("slice end index must be an integer")
+		return vm.runtimeError("slice end index must be an integer")
 	}
 
 	start := int(startInt.Value)
@@ -721,7 +788,7 @@ func (vm *VM) executeIterNext(jumpPos int) error {
 	top := vm.stack[vm.sp-1]
 	list, ok := top.(*List)
 	if !ok {
-		return fmt.Errorf("for-loop can only iterate over a list")
+		return vm.runtimeError("for-loop can only iterate over a list")
 	}
 
 	if list.iterIndex >= len(list.Elements) {
@@ -741,7 +808,7 @@ func (vm *VM) callFunction(numArgs int) error {
 	switch fn := fnValue.(type) {
 	case *CompiledFunction:
 		if numArgs != fn.NumParameters {
-			return fmt.Errorf("wrong number of arguments: expected %d, got %d", fn.NumParameters, numArgs)
+			return vm.runtimeError("wrong number of arguments: expected %d, got %d", fn.NumParameters, numArgs)
 		}
 		frame := NewFrame(fn, vm.sp-numArgs)
 		vm.pushFrame(frame)
@@ -759,6 +826,6 @@ func (vm *VM) callFunction(numArgs int) error {
 		}
 		return vm.push(result)
 	default:
-		return fmt.Errorf("calling non-function value: %s", fnValue.Type())
+		return vm.runtimeError("calling non-function value: %s", fnValue.Type())
 	}
 }

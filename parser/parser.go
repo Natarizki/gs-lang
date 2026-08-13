@@ -48,20 +48,26 @@ type (
 	infixParseFn  func(Expression) Expression
 )
 
+type ParseError struct {
+	Line    int
+	Column  int
+	Message string
+}
+
 type Parser struct {
 	l *lexer.Lexer
 
 	curToken  lexer.Token
 	peekToken lexer.Token
 
-	errors []string
+	errors []ParseError
 
 	prefixParseFns map[lexer.TokenType]prefixParseFn
 	infixParseFns  map[lexer.TokenType]infixParseFn
 }
 
 func New(l *lexer.Lexer) *Parser {
-	p := &Parser{l: l, errors: []string{}}
+	p := &Parser{l: l, errors: []ParseError{}}
 
 	p.prefixParseFns = make(map[lexer.TokenType]prefixParseFn)
 	p.registerPrefix(lexer.IDENT, p.parseIdentifier)
@@ -103,7 +109,7 @@ func (p *Parser) registerInfix(tt lexer.TokenType, fn infixParseFn) {
 	p.infixParseFns[tt] = fn
 }
 
-func (p *Parser) Errors() []string { return p.errors }
+func (p *Parser) Errors() []ParseError { return p.errors }
 
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
@@ -129,15 +135,13 @@ func (p *Parser) expectPeek(t lexer.TokenType) bool {
 }
 
 func (p *Parser) peekError(t lexer.TokenType) {
-	msg := fmt.Sprintf("line %d: expected token %s, got %s (%q)",
-		p.peekToken.Line, t, p.peekToken.Type, p.peekToken.Literal)
-	p.errors = append(p.errors, msg)
+	msg := fmt.Sprintf("expected token %s, got %s (%q)", t, p.peekToken.Type, p.peekToken.Literal)
+	p.errors = append(p.errors, ParseError{Line: p.peekToken.Line, Column: p.peekToken.Column, Message: msg})
 }
 
 func (p *Parser) noPrefixParseFnError(t lexer.TokenType) {
-	msg := fmt.Sprintf("line %d: no parse rule for token %s (%q)",
-		p.curToken.Line, t, p.curToken.Literal)
-	p.errors = append(p.errors, msg)
+	msg := fmt.Sprintf("no parse rule for token %s (%q)", t, p.curToken.Literal)
+	p.errors = append(p.errors, ParseError{Line: p.curToken.Line, Column: p.curToken.Column, Message: msg})
 }
 
 func (p *Parser) peekPrecedence() int {
@@ -170,10 +174,12 @@ func (p *Parser) parseProgramInternal(strict bool) *Program {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			if strict && !isAllowedTopLevel(stmt) {
-				p.errors = append(p.errors, fmt.Sprintf(
-					"line %d: statement not allowed outside a task block { } — only task blocks, import, start, and then are allowed at top level",
-					p.curToken.Line))
-			}
+						p.errors = append(p.errors, ParseError{
+							Line:    p.curToken.Line,
+							Column:  p.curToken.Column,
+							Message: "statement not allowed outside a task block { } — only task blocks, import, start, and then are allowed at top level",
+						})
+					}
 			program.Statements = append(program.Statements, stmt)
 		}
 		p.nextToken()
@@ -351,8 +357,10 @@ func (p *Parser) parseIntegerLiteral() Expression {
 	lit := &IntegerLiteral{Token: p.curToken}
 	value, err := strconv.ParseInt(p.curToken.Literal, 10, 64)
 	if err != nil {
-		p.errors = append(p.errors, fmt.Sprintf("line %d: could not parse %q as integer",
-			p.curToken.Line, p.curToken.Literal))
+		p.errors = append(p.errors, ParseError{
+			Line: p.curToken.Line, Column: p.curToken.Column,
+			Message: fmt.Sprintf("could not parse %q as integer", p.curToken.Literal),
+		})
 		return nil
 	}
 	lit.Value = value
@@ -363,8 +371,10 @@ func (p *Parser) parseFloatLiteral() Expression {
 	lit := &FloatLiteral{Token: p.curToken}
 	value, err := strconv.ParseFloat(p.curToken.Literal, 64)
 	if err != nil {
-		p.errors = append(p.errors, fmt.Sprintf("line %d: could not parse %q as float",
-			p.curToken.Line, p.curToken.Literal))
+		p.errors = append(p.errors, ParseError{
+			Line: p.curToken.Line, Column: p.curToken.Column,
+			Message: fmt.Sprintf("could not parse %q as float", p.curToken.Literal),
+		})
 		return nil
 	}
 	lit.Value = value
@@ -380,7 +390,10 @@ func (p *Parser) parseStringLiteral() Expression {
 
 	parts, err := parseInterpolationParts(raw)
 	if err != nil {
-		p.errors = append(p.errors, fmt.Sprintf("line %d: %s", p.curToken.Line, err))
+		p.errors = append(p.errors, ParseError{
+			Line: p.curToken.Line, Column: p.curToken.Column,
+			Message: err.Error(),
+		})
 		return &StringLiteral{Token: p.curToken, Value: raw}
 	}
 

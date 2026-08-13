@@ -23,6 +23,9 @@ type Generator struct {
 
 	afImported bool
 	foImported bool
+
+	lineTable map[int]int // posisi instruksi -> nomor baris source
+	curLine   int         // baris yang sedang di-compile
 }
 
 type EmittedInstruction struct {
@@ -35,19 +38,21 @@ func New() *Generator {
 		instructions: Instructions{},
 		constants:    []interface{}{},
 		symbolTable:  NewSymbolTable(),
+		lineTable:    make(map[int]int),
 	}
 }
 
 type Bytecode struct {
 	Instructions Instructions
 	Constants    []interface{}
+	LineTable    map[int]int
 }
 
 func (g *Generator) Bytecode() *Bytecode {
 	if !g.lastInstructionIs(OpHalt) {
 		g.emit(OpHalt)
 	}
-	return &Bytecode{Instructions: g.instructions, Constants: g.constants}
+	return &Bytecode{Instructions: g.instructions, Constants: g.constants, LineTable: g.lineTable}
 }
 
 type SymbolScope string
@@ -104,6 +109,9 @@ func (g *Generator) emit(op Opcode, operands ...int) int {
 	ins := Make(op, operands...)
 	pos := g.addInstruction(ins)
 	g.setLastInstruction(op, pos)
+	if g.curLine > 0 {
+		g.lineTable[pos] = g.curLine
+	}
 	return pos
 }
 
@@ -148,6 +156,10 @@ func (g *Generator) addConstant(obj interface{}) int {
 }
 
 func (g *Generator) Compile(node parser.Node) error {
+	if line := nodeLine(node); line > 0 {
+		g.curLine = line
+	}
+
 	switch node := node.(type) {
 
 	case *parser.Program:
@@ -792,9 +804,11 @@ func (g *Generator) compileFunctionLiteral(params []*parser.Identifier, body *pa
 	outerLast := g.lastInstruction
 	outerPrevious := g.previousInstruction
 	outerSymbolTable := g.symbolTable
+	outerLineTable := g.lineTable
 
 	g.instructions = Instructions{}
 	g.symbolTable = enclosedSymbolTable
+	g.lineTable = make(map[int]int)
 
 	for _, p := range params {
 		g.symbolTable.Define(p.Value)
@@ -810,16 +824,19 @@ func (g *Generator) compileFunctionLiteral(params []*parser.Identifier, body *pa
 
 	numLocals := g.symbolTable.numDefinitions
 	fnInstructions := g.instructions
+	fnLineTable := g.lineTable
 
 	g.instructions = outerInstructions
 	g.lastInstruction = outerLast
 	g.previousInstruction = outerPrevious
 	g.symbolTable = outerSymbolTable
+	g.lineTable = outerLineTable
 
 	compiledFn := &CompiledFunctionConstant{
 		Instructions:  fnInstructions,
 		NumLocals:     numLocals,
 		NumParameters: len(params),
+		LineTable:     fnLineTable,
 	}
 
 	g.emit(OpMakeFunction, g.addConstant(compiledFn))
@@ -1034,6 +1051,7 @@ type CompiledFunctionConstant struct {
 	Instructions  Instructions
 	NumLocals     int
 	NumParameters int
+	LineTable     map[int]int
 }
 
 // StructDefConstant menyimpan definisi struct (nama + urutan field) di constant pool
@@ -1101,4 +1119,18 @@ func FOBuiltinIndex(name string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// nodeLine mencoba mengekstrak nomor baris dari sebuah node AST lewat
+// TokenLiteral yang mereka miliki. Karena kita tidak menyimpan Line langsung
+// di semua node, kita gunakan interface kecil untuk node yang punya Token
+// dengan field Line (lihat parser.Identifier, parser.ExpressionStatement, dst).
+func nodeLine(node parser.Node) int {
+	type lineGetter interface {
+		GetLine() int
+	}
+	if lg, ok := node.(lineGetter); ok {
+		return lg.GetLine()
+	}
+	return 0
 }

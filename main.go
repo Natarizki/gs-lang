@@ -84,14 +84,13 @@ func runFile(path string) {
 	program := p.ParseProgramStrict()
 
 	if len(p.Errors()) > 0 {
-		fmt.Println("Parse errors:")
 		for _, e := range p.Errors() {
-			fmt.Println("  " + e)
+			fmt.Print(formatSourceError(filepath.Base(path), string(src), e.Line, e.Column, e.Message))
 		}
 		os.Exit(1)
 	}
 
-        program, err = resolveImports(program, filepath.Dir(path), make(map[string]bool))
+	program, err = resolveImports(program, filepath.Dir(path), make(map[string]bool))
 	if err != nil {
 		fmt.Printf("Import error: %s\n", err)
 		os.Exit(1)
@@ -99,7 +98,7 @@ func runFile(path string) {
 
 	gen := bytecode.New()
 	if err := gen.Compile(program); err != nil {
-		fmt.Printf("Compile error: %s\n", err)
+		fmt.Printf("Error: %s\n", err)
 		os.Exit(1)
 	}
 
@@ -117,6 +116,7 @@ func runFile(path string) {
 	}
 
 	machine := vm.New(bc)
+	machine.SetSourceInfo(filepath.Base(path), string(src))
 	if err := machine.Run(); err != nil {
 		fmt.Printf("Runtime error: %s\n", err)
 		os.Exit(1)
@@ -184,12 +184,12 @@ func resolveImports(program *parser.Program, baseDir string, visited map[string]
 			importedProgram := p.ParseProgram()
 
 			if len(p.Errors()) > 0 {
-				msg := fmt.Sprintf("parse errors in imported file %q:", absPath)
-				for _, e := range p.Errors() {
-					msg += "\n  " + e
-				}
-				return nil, fmt.Errorf("%s", msg)
-			}
+						msg := fmt.Sprintf("parse errors in imported file %q:", absPath)
+						for _, e := range p.Errors() {
+							msg += fmt.Sprintf("\n  line %d: %s", e.Line, e.Message)
+						}
+						return nil, fmt.Errorf("%s", msg)
+					}
 
 			importedProgram, err = resolveImports(importedProgram, filepath.Dir(absPath), visited)
 			if err != nil {
@@ -295,9 +295,8 @@ func buildBinary(sourcePath string, outputPath string) {
 	program := p.ParseProgramStrict()
 
 	if len(p.Errors()) > 0 {
-		fmt.Println("Parse errors:")
 		for _, e := range p.Errors() {
-			fmt.Println("  " + e)
+			fmt.Print(formatSourceError(filepath.Base(sourcePath), string(src), e.Line, e.Column, e.Message))
 		}
 		os.Exit(1)
 	}
@@ -310,7 +309,7 @@ func buildBinary(sourcePath string, outputPath string) {
 
 	gen := bytecode.New()
 	if err := gen.Compile(program); err != nil {
-		fmt.Printf("Compile error: %s\n", err)
+		fmt.Printf("Error: %s\n", err)
 		os.Exit(1)
 	}
 
@@ -459,4 +458,31 @@ func main() {
 }
 `
 	return os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte(mainContent), 0644)
+}
+
+// formatSourceError menghasilkan pesan error bergaya Rust/Go modern, menunjukkan
+// baris kode asli dan penunjuk posisi kolom di bawahnya
+func formatSourceError(filename string, src string, line int, col int, message string) string {
+	lines := strings.Split(src, "\n")
+	if line < 1 || line > len(lines) {
+		return fmt.Sprintf("Error: %s\n  --> %s:%d:%d\n", message, filename, line, col)
+	}
+
+	codeLine := lines[line-1]
+	lineNumStr := fmt.Sprintf("%d", line)
+	padding := strings.Repeat(" ", len(lineNumStr))
+
+	pointer := ""
+	if col > 0 && col <= len(codeLine)+1 {
+		pointer = strings.Repeat(" ", col-1) + "^"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Error: %s\n", message)
+	fmt.Fprintf(&b, "  %s--> %s:%d:%d\n", padding, filename, line, col)
+	fmt.Fprintf(&b, "   %s|\n", padding)
+	fmt.Fprintf(&b, " %s | %s\n", lineNumStr, codeLine)
+	fmt.Fprintf(&b, "   %s| %s\n", padding, pointer)
+
+	return b.String()
 }
