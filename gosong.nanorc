@@ -25,7 +25,3 @@ color brightyellow "\<(id::[0-9]+)\>"
 
 # Braces
 color brightwhite "[{}]"
-
-
-set linenumbers
-set saveonexit
