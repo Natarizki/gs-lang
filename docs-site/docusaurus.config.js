@@ -137,7 +137,7 @@ const config = {
             ],
           },
         ],
-        copyright: `Copyright © ${new Date().getFullYear()} GoSong (GS). Built with Docusaurus.`,
+        copyright: `Copyright © ${new Date().getFullYear()} GoSong (GS). All rights reserved.`,
       },
       prism: {
         theme: prismThemes.github,
