@@ -76,7 +76,6 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
-      // Replace with your project's social card
       // Social card
       image: 'img/logo.png',
       colorMode: {
@@ -116,11 +115,13 @@ const config = {
             ],
           },
           {
-          title: 'Community',
-        items: [
-          {
-            label: 'GitHub Discussions',
-            href: 'https://github.com/Natarizki/gs-lang/discussions',
+            title: 'Community',
+            items: [
+              {
+                label: 'GitHub Discussions',
+                href: 'https://github.com/Natarizki/gs-lang/discussions',
+              },
+            ],
           },
           {
             title: 'More',
